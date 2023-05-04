@@ -343,3 +343,110 @@ impl<E: FieldElement> ToElements<E> for E {
         vec![*self]
     }
 }
+
+// FRACTION OF FIELD ELEMENTS
+// ================================================================================================
+
+/// Defines arithmetic over fractions of [FieldElement].
+///
+#[derive(Debug, Copy, Clone)]
+pub struct Fraction<E: FieldElement>(E, E);
+
+impl<E: FieldElement> Fraction<E> {
+    #[inline(always)]
+    pub fn new(num: E, den: E) -> Self {
+        Self(num, den)
+    }
+    #[inline(always)]
+    pub fn num(&self) -> E {
+        self.0
+    }
+    #[inline(always)]
+    pub fn den(&self) -> E {
+        self.1
+    }
+}
+
+impl<E: FieldElement> Randomizable for Fraction<E> {
+    const VALUE_SIZE: usize = 2 * <E as Randomizable>::VALUE_SIZE;
+
+    fn from_random_bytes(source: &[u8]) -> Option<Self> {
+        let n = <E as Randomizable>::from_random_bytes(&source[..Self::VALUE_SIZE / 2]);
+        let d = <E as Randomizable>::from_random_bytes(&source[Self::VALUE_SIZE / 2..]);
+        match (n, d) {
+            (Some(n), Some(d)) => Some(Self(n, d)),
+            _ => None,
+        }
+    }
+}
+
+impl<E: FieldElement> From<E> for Fraction<E> {
+    #[inline(always)]
+    fn from(e: E) -> Self {
+        Self(e, E::ONE)
+    }
+}
+
+impl<E: FieldElement> Add<E> for Fraction<E> {
+    type Output = Self;
+
+    #[inline(always)]
+    fn add(self, rhs: E) -> Self {
+        Self(self.0 + rhs * self.1, self.1)
+    }
+}
+
+impl<E: FieldElement> Add for Fraction<E> {
+    type Output = Self;
+
+    #[inline(always)]
+    fn add(self, rhs: Self) -> Self {
+        Self(self.0 * rhs.1 + self.1 * rhs.0, self.1 * rhs.1)
+    }
+}
+
+impl<E: FieldElement> AddAssign for Fraction<E> {
+    #[inline(always)]
+    fn add_assign(&mut self, rhs: Fraction<E>) {
+        *self = *self + rhs
+    }
+}
+
+impl<E: FieldElement> AddAssign<E> for Fraction<E> {
+    #[inline(always)]
+    fn add_assign(&mut self, rhs: E) {
+        *self = *self + rhs
+    }
+}
+
+impl<E: FieldElement> Mul<E> for Fraction<E> {
+    type Output = Self;
+
+    #[inline(always)]
+    fn mul(self, rhs: E) -> Self {
+        Self(self.0 * rhs, self.1)
+    }
+}
+
+impl<E: FieldElement> Mul for Fraction<E> {
+    type Output = Self;
+
+    #[inline(always)]
+    fn mul(self, rhs: Self) -> Self {
+        Self(self.0 * rhs.0, self.1 * rhs.1)
+    }
+}
+
+impl<E: FieldElement> MulAssign for Fraction<E> {
+    #[inline(always)]
+    fn mul_assign(&mut self, rhs: Fraction<E>) {
+        *self = *self * rhs
+    }
+}
+
+impl<E: FieldElement> MulAssign<E> for Fraction<E> {
+    #[inline(always)]
+    fn mul_assign(&mut self, rhs: E) {
+        *self = *self * rhs
+    }
+}

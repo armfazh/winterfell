@@ -97,7 +97,7 @@ pub mod fft;
 pub mod polynom;
 
 mod field;
-pub use field::{ExtensibleField, ExtensionOf, FieldElement, StarkField, ToElements};
+pub use field::{ExtensibleField, ExtensionOf, FieldElement, Fraction, StarkField, ToElements};
 pub mod fields {
     //! Finite field implementations.
     //!
@@ -113,5 +113,6 @@ pub mod fields {
 
 mod utils;
 pub use crate::utils::{
-    add_in_place, batch_inversion, get_power_series, get_power_series_with_offset, log2, mul_acc,
+    add_in_place, batch_inversion, batch_simplify_fractions, get_power_series,
+    get_power_series_with_offset, log2, mul_acc,
 };

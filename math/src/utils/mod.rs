@@ -3,7 +3,10 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
-use crate::{field::FieldElement, ExtensionOf};
+use crate::{
+    field::{FieldElement, Fraction},
+    ExtensionOf,
+};
 use utils::{batch_iter_mut, collections::Vec, iter_mut, uninit_vector};
 
 #[cfg(feature = "concurrent")]
@@ -235,4 +238,26 @@ fn serial_batch_inversion<E: FieldElement>(values: &[E], result: &mut [E]) {
             last *= values[i];
         }
     }
+}
+
+/// Simultaneously simplifies a vector of fractions (a/b) as a*b^1 using
+/// batched inversion.
+///
+///
+/// # Examples
+/// ```
+/// # use winter_math::batch_simplify_fractions;
+/// # use winter_math::{fields::{f128::BaseElement}, Fraction, FieldElement};
+/// # use rand_utils::rand_vector;
+/// let a: Vec<Fraction<BaseElement>> = rand_vector(2048);
+/// let b = batch_simplify_fractions(&a);
+///
+/// for (&a, &b) in a.iter().zip(b.iter()) {
+///     assert_eq!(a.num() / a.den(), b);
+/// }
+/// ```
+pub fn batch_simplify_fractions<E: FieldElement>(x: &[Fraction<E>]) -> Vec<E> {
+    let den: Vec<E> = x.iter().map(|f| f.den()).collect();
+    let den_inv = batch_inversion(&den);
+    x.iter().zip(den_inv).map(|(f, d)| f.num() * d).collect()
 }
