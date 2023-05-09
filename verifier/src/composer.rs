@@ -4,7 +4,7 @@
 // LICENSE file in the root directory of this source tree.
 
 use air::{proof::Table, Air, DeepCompositionCoefficients, EvaluationFrame};
-use math::{batch_inversion, FieldElement};
+use math::{batch_simplify_fractions, FieldElement, Fraction};
 use utils::collections::Vec;
 
 // DEEP COMPOSER
@@ -61,42 +61,31 @@ impl<E: FieldElement> DeepComposer<E> {
     ) -> Vec<E> {
         let ood_main_trace_states = [ood_main_frame.current(), ood_main_frame.next()];
 
-        // compose columns of of the main trace segment; we do this separately for numerators of
-        // each query; we also track common denominator for each query separately; this way we can
-        // use a batch inversion in the end.
+        // compose columns of of the main trace segment
         let n = queried_main_trace_states.num_rows();
-        let mut result_num = Vec::<E>::with_capacity(n);
-        let mut result_den = Vec::<E>::with_capacity(n);
+        let mut result = Vec::<Fraction<E>>::with_capacity(n);
 
         for ((_, row), &x) in (0..n)
             .zip(queried_main_trace_states.rows())
             .zip(&self.x_coordinates)
         {
-            let mut t1_num = E::ZERO;
-            let mut t2_num = E::ZERO;
-
+            let mut tx: Fraction<_> = E::ZERO.into();
             for (i, &value) in row.iter().enumerate() {
                 let value = E::from(value);
-                // compute the numerator of T'_i(x) as (T_i(x) - T_i(z)), multiply it by a
-                // composition coefficient, and add the result to the numerator aggregator
-                t1_num += (value - ood_main_trace_states[0][i]) * self.cc.trace[i].0;
+                // compute T'_i(x) = (T_i(x) - T_i(z)) / (x - z), multiply it by a composition
+                // coefficient, and add the result to T(x)
+                tx += Fraction::new(value - ood_main_trace_states[0][i], x - self.z[0])
+                    * self.cc.trace[i].0;
 
-                // compute the numerator of T''_i(x) as (T_i(x) - T_i(z * g)), multiply it by a
-                // composition coefficient, and add the result to the numerator aggregator
-                t2_num += (value - ood_main_trace_states[1][i]) * self.cc.trace[i].1;
+                // compute T''_i(x) = (T_i(x) - T_i(z * g)) / (x - z * g), multiply it by a
+                // composition coefficient, and add the result to T(x)
+                tx += Fraction::new(value - ood_main_trace_states[1][i], x - self.z[1])
+                    * self.cc.trace[i].1;
             }
-            // compute the common denominator as (x - z) * (x - z * g)
-            let t1_den = x - self.z[0];
-            let t2_den = x - self.z[1];
-            result_den.push(t1_den * t2_den);
-
-            // add the numerators of T'_i(x) and T''_i(x) together; we can do this because later on
-            // we'll use the common denominator computed above.
-            result_num.push(t1_num * t2_den + t2_num * t1_den);
+            result.push(tx);
         }
 
-        // if the trace has auxiliary segments, compose columns from these segments as well; we
-        // also do this separately for numerators and denominators.
+        // if the trace has auxiliary segments, compose columns from these segments as well
         if let Some(queried_aux_trace_states) = queried_aux_trace_states {
             let ood_aux_frame = ood_aux_frame.expect("missing auxiliary OOD frame");
             let ood_aux_trace_states = [ood_aux_frame.current(), ood_aux_frame.next()];
@@ -109,32 +98,23 @@ impl<E: FieldElement> DeepComposer<E> {
                 .zip(queried_aux_trace_states.rows())
                 .zip(&self.x_coordinates)
             {
-                let mut t1_num = E::ZERO;
-                let mut t2_num = E::ZERO;
+                let mut tx: Fraction<_> = E::ZERO.into();
                 for (i, &value) in row.iter().enumerate() {
-                    // compute the numerator of T'_i(x) as (T_i(x) - T_i(z)), multiply it by a
-                    // composition coefficient, and add the result to the numerator aggregator
-                    t1_num += (value - ood_aux_trace_states[0][i]) * self.cc.trace[cc_offset + i].0;
+                    // compute T'_i(x) = (T_i(x) - T_i(z)) / (x - z), multiply it by a composition
+                    // coefficient, and add the result to T(x)
+                    tx += Fraction::new(value - ood_aux_trace_states[0][i], x - self.z[0])
+                        * self.cc.trace[cc_offset + i].0;
 
-                    // compute the numerator of T''_i(x) as (T_i(x) - T_i(z * g)), multiply it by a
-                    // composition coefficient, and add the result to the numerator aggregator
-                    t2_num += (value - ood_aux_trace_states[1][i]) * self.cc.trace[cc_offset + i].1;
+                    // compute T''_i(x) = (T_i(x) - T_i(z * g)) / (x - z * g), multiply it by a
+                    // composition coefficient, and add the result to T(x)
+                    tx += Fraction::new(value - ood_aux_trace_states[1][i], x - self.z[1])
+                        * self.cc.trace[cc_offset + i].1;
                 }
-
-                // compute the common denominators (x - z) and (x - z * g), and use the to aggregate
-                // numerators into the common numerator computed for the main trace of this query
-                let t1_den = x - self.z[0];
-                let t2_den = x - self.z[1];
-                result_num[j] += t1_num * t2_den + t2_num * t1_den;
+                result[j] += tx;
             }
         }
 
-        result_den = batch_inversion(&result_den);
-        result_num
-            .iter()
-            .zip(result_den)
-            .map(|(n, d)| *n * d)
-            .collect()
+        batch_simplify_fractions(&result)
     }
 
     /// For each queried set of composition polynomial column evaluations, combine evaluations
@@ -157,32 +137,24 @@ impl<E: FieldElement> DeepComposer<E> {
         assert_eq!(queried_evaluations.num_rows(), self.x_coordinates.len());
 
         let n = queried_evaluations.num_rows();
-        let mut result_num = Vec::<E>::with_capacity(n);
-        let mut result_den = Vec::<E>::with_capacity(n);
+        let mut result = Vec::<Fraction<E>>::with_capacity(n);
 
         // compute z^m
         let num_evaluation_columns = ood_evaluations.len() as u32;
         let z_m = self.z[0].exp_vartime(num_evaluation_columns.into());
 
-        // combine composition polynomial columns separately for numerators and denominators;
-        // this way we can use batch inversion in the end.
         for (query_values, &x) in queried_evaluations.rows().zip(&self.x_coordinates) {
-            let mut composition_num = E::ZERO;
+            let mut hx: Fraction<_> = E::ZERO.into();
             for (i, &evaluation) in query_values.iter().enumerate() {
-                // compute the numerator of H'_i(x) as (H_i(x) - H_i(z^m)), multiply it by a
-                // composition coefficient, and add the result to the numerator aggregator
-                composition_num += (evaluation - ood_evaluations[i]) * self.cc.constraints[i];
+                // compute H'_i(x) = (H_i(x) - H_i(z^m)) / (x - z^m)
+                // multiply it by a pseudo-random coefficient, and add the result to H(x)
+                hx += Fraction::new(evaluation - ood_evaluations[i], x - z_m)
+                    * self.cc.constraints[i];
             }
-            result_num.push(composition_num);
-            result_den.push(x - z_m);
+            result.push(hx);
         }
 
-        result_den = batch_inversion(&result_den);
-        result_num
-            .iter()
-            .zip(result_den)
-            .map(|(n, d)| *n * d)
-            .collect()
+        batch_simplify_fractions(&result)
     }
 
     /// Combines trace and constraint compositions together, and also rases the degree of the
